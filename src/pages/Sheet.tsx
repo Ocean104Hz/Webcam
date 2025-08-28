@@ -45,7 +45,7 @@ export default function SimpleForm() {
 
     return (
         <div className="max-w-md mx-auto p-4">
-            <Link to="/Sheet" className="hover:underline px-3 py-2 rounded-2xl shadow bg-blue-500 text-white disabled:opacity-50">
+            <Link to="/" className="hover:underline px-3 py-2 rounded-2xl shadow bg-blue-500 text-white disabled:opacity-50">
                 หน้าหลัก
             </Link>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
