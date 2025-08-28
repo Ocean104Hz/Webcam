@@ -27,6 +27,7 @@ export default function DigitScanner() {
   const [conf, setConf] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [sendStatus, setSendStatus] = useState<string>("");
 
   // Fix Worker ref type
   const workerRef = useRef<Worker | null>(null);
@@ -35,10 +36,16 @@ export default function DigitScanner() {
   const intervalRef = useRef<number | null>(null);
 
   const sendToGoogleSheet = async () => {
-    if (!result) return;
+    if (!result) {
+      setSendStatus("ไม่มีข้อมูลที่จะส่ง");
+      return;
+    }
+
+    setSendStatus("กำลังส่งข้อมูล...");
 
     try {
-      const res = await fetch(
+      // ลองส่งด้วยวิธี POST ก่อน
+      const postResponse = await fetch(
         "https://script.google.com/macros/s/AKfycbzaHo2SXOCbTNfvVotjhFWV7wwEH_B9RHW27ZjI4gOQnXqHTKt5rSVD6rF1O6241rvWXQ/exec",
         {
           method: "POST",
@@ -49,11 +56,42 @@ export default function DigitScanner() {
         }
       );
 
-      const data = await res.json();
-      console.log("Saved to Google Sheet:", data);
-    } catch (err) {
-      console.error("Failed to send to Google Sheet:", err);
+      if (!postResponse.ok) {
+        throw new Error(`POST failed: ${postResponse.status}`);
+      }
+
+      const postData = await postResponse.json();
+      console.log("POST success:", postData);
+      setSendStatus(`✓ ส่งสำเร็จ (POST): ${result}`);
+      
+    } catch (postError) {
+      console.error("POST failed, trying GET:", postError);
+      
+      // ถ้า POST ไม่ได้ ลอง GET
+      try {
+        const getResponse = await fetch(
+          `https://script.google.com/macros/s/AKfycbzaHo2SXOCbTNfvVotjhFWV7wwEH_B9RHW27ZjI4gOQnXqHTKt5rSVD6rF1O6241rvWXQ/exec?result=${encodeURIComponent(result)}`,
+          {
+            method: "GET",
+          }
+        );
+
+        if (!getResponse.ok) {
+          throw new Error(`GET failed: ${getResponse.status}`);
+        }
+
+        const getData = await getResponse.json();
+        console.log("GET success:", getData);
+        setSendStatus(`✓ ส่งสำเร็จ (GET): ${result}`);
+        
+      } catch (getError) {
+        console.error("Both POST and GET failed:", getError);
+        setSendStatus(`✗ ส่งไม่สำเร็จ: ${String(getError)}`);
+      }
     }
+
+    // Clear status after 3 seconds
+    setTimeout(() => setSendStatus(""), 3000);
   };
 
   // Initialize Tesseract worker
@@ -64,12 +102,8 @@ export default function DigitScanner() {
         const worker = await createWorker("eng", undefined, {
           logger: (m: LoggerMessage) => console.log(m),
         });
-        // Language is already loaded from createWorker parameter
-        // await worker.loadLanguage("eng");
-        // await worker.initialize("eng");
         await worker.setParameters({
           tessedit_char_whitelist: "0123456789",
-          // Fix: Use PSM enum
           tessedit_pageseg_mode: PSM.SINGLE_LINE,
         });
         if (!cancelled) {
@@ -125,7 +159,6 @@ export default function DigitScanner() {
       rafRef.current = null;
     }
     if (videoRef.current && videoRef.current.srcObject) {
-      // Fix parameter type
       const tracks =
         (videoRef.current.srcObject as MediaStream).getTracks() || [];
       tracks.forEach((t: MediaStreamTrack) => t.stop());
@@ -136,7 +169,6 @@ export default function DigitScanner() {
 
   useEffect(() => {
     return () => {
-      // cleanup on unmount
       stopCamera();
       if (workerRef.current) {
         workerRef.current.terminate();
@@ -149,7 +181,6 @@ export default function DigitScanner() {
   const getROI = (): ROIRect | null => {
     const video = videoRef.current;
     if (!video) return null;
-    // ROI: centered box occupying 70% width and 25% height
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!vw || !vh) return null;
@@ -169,7 +200,6 @@ export default function DigitScanner() {
     const roi = getROI();
     if (!roi) return;
 
-    // Draw current ROI frame to canvas
     canvas.width = Math.min(roi.w, 640);
     canvas.height = (roi.h * canvas.width) / roi.w;
     const ctx = canvas.getContext("2d");
@@ -189,7 +219,7 @@ export default function DigitScanner() {
     const data = imgData.data;
     for (let i = 0; i < data.length; i += 4) {
       const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      const v = avg > 160 ? 255 : 0; // threshold 160
+      const v = avg > 160 ? 255 : 0;
       data[i] = data[i + 1] = data[i + 2] = v;
     }
     ctx.putImageData(imgData, 0, 0);
@@ -198,14 +228,12 @@ export default function DigitScanner() {
       ocrBusyRef.current = true;
       const { data } = await worker.recognize(canvas);
       const text = (data?.text ?? "").trim();
-      // keep only digits and collapse spaces/newlines
       const digits = text
         .replace(/[^0-9]/g, "")
         .slice(0, 32)
         .replace(/[^0-9OIl]/g, "")
         .replace(/[O]/g, "0")
         .replace(/[Il]/g, "1");
-      // limit length for safety
       if (digits) {
         setResult(digits);
         setConf(Math.round((data?.confidence ?? 0) * 10) / 10);
@@ -222,7 +250,6 @@ export default function DigitScanner() {
     setScanning((s) => {
       const next = !s;
       if (next) {
-        // Run OCR ~2x per second to save CPU/battery
         intervalRef.current = setInterval(() => {
           singleOcrPass();
         }, 500);
@@ -239,7 +266,12 @@ export default function DigitScanner() {
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(result || "");
-    } catch {}
+      setSendStatus("✓ คัดลอกแล้ว");
+      setTimeout(() => setSendStatus(""), 2000);
+    } catch {
+      setSendStatus("✗ คัดลอกไม่สำเร็จ");
+      setTimeout(() => setSendStatus(""), 2000);
+    }
   };
 
   return (
@@ -259,6 +291,18 @@ export default function DigitScanner() {
           </div>
         )}
 
+        {sendStatus && (
+          <div className={`p-3 rounded-2xl border ${
+            sendStatus.includes('✓') 
+              ? 'bg-green-100 text-green-700 border-green-200' 
+              : sendStatus.includes('✗')
+              ? 'bg-red-100 text-red-700 border-red-200'
+              : 'bg-blue-100 text-blue-700 border-blue-200'
+          }`}>
+            {sendStatus}
+          </div>
+        )}
+
         <div className="relative rounded-2xl overflow-hidden shadow-md bg-black">
           <video
             ref={videoRef}
@@ -267,8 +311,6 @@ export default function DigitScanner() {
             muted
             autoPlay
           />
-
-          {/* ROI overlay */}
           <RoiOverlay getROI={getROI} />
         </div>
 
@@ -305,7 +347,7 @@ export default function DigitScanner() {
           <button
             onClick={sendToGoogleSheet}
             disabled={!result}
-            className="px-3 py-2 rounded-2xl shadow bg-slate-100 disabled:opacity-50"
+            className="px-3 py-2 rounded-2xl shadow bg-blue-500 text-white disabled:opacity-50"
           >
             ส่งผลลัพธ์
           </button>
@@ -329,7 +371,6 @@ export default function DigitScanner() {
           </div>
         </div>
 
-        {/* Hidden offscreen canvas for OCR */}
         <canvas ref={canvasRef} className="hidden" />
 
         <Tips />
@@ -341,7 +382,6 @@ export default function DigitScanner() {
 function RoiOverlay({ getROI }: RoiOverlayProps) {
   const [rect, setRect] = useState<ROIRect | null>(null);
 
-  // Poll ROI on resize / video metadata loaded
   useEffect(() => {
     const update = () => setRect(getROI());
     update();
@@ -356,8 +396,6 @@ function RoiOverlay({ getROI }: RoiOverlayProps) {
 
   if (!rect) return null;
 
-  // We can't know the rendered CSS pixels vs video pixels easily,
-  // so draw a centered guide using absolute positioning with percentages
   return (
     <div className="absolute inset-0 grid place-items-center pointer-events-none">
       <div
