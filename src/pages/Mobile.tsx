@@ -27,57 +27,59 @@ export default function DigitScanner() {
   const [conf, setConf] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
-  const [sendStatus, setSendStatus] = useState<string>("");
 
   // Fix Worker ref type
   const workerRef = useRef<Worker | null>(null);
   const ocrBusyRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
   const intervalRef = useRef<number | null>(null);
 
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMessage, setModalMessage] = useState("");
+  const [modalType, setModalType] = useState<"success" | "error">("success");
+
   const sendToGoogleSheet = async () => {
-  if (!result) {
-    setSendStatus("ไม่มีข้อมูลที่จะส่ง");
-    return;
-  }
-
-  setSendStatus("กำลังส่งข้อมูล...");
-
-  try {
-    // 🔹 เปลี่ยน URL ตรงนี้เป็น URL ของ Sheety ที่ได้มา
-    const sheetyUrl = "https://api.sheety.co/3c71bb24fa11671f4674ec67c9e1895c/webcam/cam1";
-
-    // 🔹 ตามโครงสร้าง Sheety ต้องใส่ object ที่หุ้ม field
-    const body = {
-      result: {
-        value: result, // คุณตั้งชื่อ column ใน Google Sheets ว่าอะไร ต้องตรงกัน เช่น "value"
-      },
-    };
-
-    const response = await fetch(sheetyUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // "Authorization": "Bearer YOUR_TOKEN" // ถ้าเปิด private project ต้องใส่ token ด้วย
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      throw new Error(`POST failed: ${response.status}`);
+    if (!result) {
+      setModalMessage("ไม่มีข้อมูลที่จะส่ง");
+      setModalType("error");
+      setModalOpen(true);
+      return;
     }
 
-    const data = await response.json();
-    console.log("Sheety success:", data);
-    setSendStatus(`✓ ส่งสำเร็จ: ${result}`);
-  } catch (err) {
-    console.error("Sheety error:", err);
-    setSendStatus(`✗ ส่งไม่สำเร็จ: ${String(err)}`);
-  }
+    try {
+      // 🔹 เปลี่ยน URL ตรงนี้เป็น URL ของ Sheety ที่ได้มา
+      const sheetyUrl =
+        "https://api.sheety.co/3c71bb24fa11671f4674ec67c9e1895c/webcam/cam1";
 
-  // ล้างสถานะหลัง 3 วิ
-  setTimeout(() => setSendStatus(""), 3000);
-};
+      // 🔹 ตามโครงสร้าง Sheety ต้องใส่ object ที่หุ้ม field
+      const body = {
+        result: {
+          value: result,
+        },
+      };
+
+      const response = await fetch(sheetyUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        throw new Error(`POST failed: ${response.status}`);
+      }
+
+      setModalMessage(`✓ ส่งสำเร็จ: ${result}`);
+      setModalType("success");
+      setModalOpen(true);
+    } catch (err) {
+      console.error("Sheety error:", err);
+      setModalMessage(`✗ ส่งไม่สำเร็จ: ${String(err)}`);
+      setModalType("error");
+      setModalOpen(true);
+    }
+  };
+
   // Initialize Tesseract worker
   useEffect(() => {
     let cancelled = false;
@@ -128,7 +130,9 @@ export default function DigitScanner() {
       setStreaming(true);
     } catch (e) {
       console.error(e);
-      setError("ไม่สามารถเข้าถึงกล้องได้ – ต้องใช้ HTTPS และอนุญาตสิทธิ์กล้อง");
+      setError(
+        "ไม่สามารถเข้าถึงกล้องได้ – ต้องใช้ HTTPS และอนุญาตสิทธิ์กล้อง"
+      );
     }
   };
 
@@ -137,10 +141,6 @@ export default function DigitScanner() {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
-    }
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
     }
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks =
@@ -234,7 +234,7 @@ export default function DigitScanner() {
     setScanning((s) => {
       const next = !s;
       if (next) {
-        intervalRef.current = setInterval(() => {
+        intervalRef.current = window.setInterval(() => {
           singleOcrPass();
         }, 500);
       } else {
@@ -250,11 +250,13 @@ export default function DigitScanner() {
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(result || "");
-      setSendStatus("✓ คัดลอกแล้ว");
-      setTimeout(() => setSendStatus(""), 2000);
+      setModalMessage("✓ คัดลอกแล้ว");
+      setModalType("success");
+      setModalOpen(true);
     } catch {
-      setSendStatus("✗ คัดลอกไม่สำเร็จ");
-      setTimeout(() => setSendStatus(""), 2000);
+      setModalMessage("✗ คัดลอกไม่สำเร็จ");
+      setModalType("error");
+      setModalOpen(true);
     }
   };
 
@@ -272,18 +274,6 @@ export default function DigitScanner() {
         {error && (
           <div className="p-3 rounded-2xl bg-red-100 text-red-700 border border-red-200">
             {error}
-          </div>
-        )}
-
-        {sendStatus && (
-          <div className={`p-3 rounded-2xl border ${
-            sendStatus.includes('✓') 
-              ? 'bg-green-100 text-green-700 border-green-200' 
-              : sendStatus.includes('✗')
-              ? 'bg-red-100 text-red-700 border-red-200'
-              : 'bg-blue-100 text-blue-700 border-blue-200'
-          }`}>
-            {sendStatus}
           </div>
         )}
 
@@ -358,6 +348,13 @@ export default function DigitScanner() {
         <canvas ref={canvasRef} className="hidden" />
 
         <Tips />
+
+        <Modal
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          message={modalMessage}
+          type={modalType}
+        />
       </div>
     </div>
   );
@@ -409,6 +406,41 @@ function Tips() {
       <div className="mt-3 text-xs opacity-70">
         หมายเหตุ: หากต้องการอ่านบาร์โค้ด/QR โดยเฉพาะ แนะนำใช้ BarcodeDetector
         API (ถ้าบราวเซอร์รองรับ) แทน OCR เพื่อความเร็ว
+      </div>
+    </div>
+  );
+}
+
+function Modal({
+  open,
+  onClose,
+  message,
+  type,
+}: {
+  open: boolean;
+  onClose: () => void;
+  message: string;
+  type: "success" | "error";
+}) {
+  if (!open) return null;
+
+  const color =
+    type === "success"
+      ? "bg-green-100 text-green-800 border-green-300"
+      : "bg-red-100 text-red-800 border-red-300";
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
+      <div
+        className={`p-6 rounded-2xl shadow-xl border ${color} max-w-sm w-full`}
+      >
+        <p className="text-center">{message}</p>
+        <button
+          onClick={onClose}
+          className="mt-4 w-full py-2 rounded-xl bg-slate-900 text-white"
+        >
+          ปิด
+        </button>
       </div>
     </div>
   );
