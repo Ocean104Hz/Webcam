@@ -34,6 +34,28 @@ export default function DigitScanner() {
   const rafRef = useRef<number | null>(null);
   const intervalRef = useRef<number | null>(null);
 
+  const sendToGoogleSheet = async () => {
+    if (!result) return;
+
+    try {
+      const res = await fetch(
+        "https://script.google.com/macros/s/AKfycbx2OECGBZT4DuKWz_iYhUV-SwagbSFFdzKiP0xCeIJzAi-wZxIVdxIqJAr5VkERXPIfIg/exec",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ result }),
+        }
+      );
+
+      const data = await res.json();
+      console.log("Saved to Google Sheet:", data);
+    } catch (err) {
+      console.error("Failed to send to Google Sheet:", err);
+    }
+  };
+
   // Initialize Tesseract worker
   useEffect(() => {
     let cancelled = false;
@@ -152,7 +174,17 @@ export default function DigitScanner() {
     canvas.height = (roi.h * canvas.width) / roi.w;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, roi.x, roi.y, roi.w, roi.h, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      video,
+      roi.x,
+      roi.y,
+      roi.w,
+      roi.h,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
     const imgData = ctx.getImageData(0, 0, roi.w, roi.h);
     const data = imgData.data;
     for (let i = 0; i < data.length; i += 4) {
@@ -167,8 +199,13 @@ export default function DigitScanner() {
       const { data } = await worker.recognize(canvas);
       const text = (data?.text ?? "").trim();
       // keep only digits and collapse spaces/newlines
-      const digits = text.replace(/[^0-9]/g, "").slice(0, 32).replace(/[^0-9OIl]/g, "").replace(/[O]/g, "0").replace(/[Il]/g, "1");
-     // limit length for safety
+      const digits = text
+        .replace(/[^0-9]/g, "")
+        .slice(0, 32)
+        .replace(/[^0-9OIl]/g, "")
+        .replace(/[O]/g, "0")
+        .replace(/[Il]/g, "1");
+      // limit length for safety
       if (digits) {
         setResult(digits);
         setConf(Math.round((data?.confidence ?? 0) * 10) / 10);
@@ -263,6 +300,14 @@ export default function DigitScanner() {
             className="px-3 py-2 rounded-2xl shadow bg-slate-100 disabled:opacity-50"
           >
             คัดลอกผลลัพธ์
+          </button>
+
+          <button
+            onClick={sendToGoogleSheet}
+            disabled={!result}
+            className="px-3 py-2 rounded-2xl shadow bg-slate-100 disabled:opacity-50"
+          >
+            ส่งผลลัพธ์
           </button>
 
           <span className="ml-auto text-sm opacity-70">
