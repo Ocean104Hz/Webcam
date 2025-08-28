@@ -1,44 +1,54 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createWorker } from "tesseract.js";
+import { useEffect, useRef, useState } from "react";
+import { createWorker, type Worker, PSM } from "tesseract.js";
+import type { LoggerMessage } from "tesseract.js";
 
-// Single-file React component that opens the mobile camera and scans ONLY digits (0-9)
-// Notes:
-// - Must be served over HTTPS for camera access (except localhost)
-// - On iOS Safari, autoplay requires playsInline + muted and a user gesture before starting
-// - Focuses OCR on a centered Region Of Interest (ROI) to improve speed/accuracy
-// - Uses Tesseract.js with a whitelist for digits
+// Define interfaces for better type safety
+interface ROIRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface RoiOverlayProps {
+  getROI: () => ROIRect | null;
+}
 
 export default function DigitScanner() {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null); // offscreen canvas for ROI
+  // Fix ref types
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
   const [streaming, setStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [result, setResult] = useState("");
-  const [conf, setConf] = useState(null);
+  
+  // Fix state type for conf
+  const [conf, setConf] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
 
-  const workerRef = useRef(null);
+  // Fix Worker ref type
+  const workerRef = useRef<Worker | null>(null);
   const ocrBusyRef = useRef(false);
-  const rafRef = useRef(null);
-  const intervalRef = useRef(null);
+  const rafRef = useRef<number | null>(null);
+  const intervalRef = useRef<number | null>(null);
 
   // Initialize Tesseract worker
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const worker = await createWorker({
-          logger: (m) => {
-            Optional: console.debug(m);
-          },
-          // workerPath / langPath / corePath can be customized if needed
+        const worker = await createWorker("eng", undefined, {
+          logger: (m: LoggerMessage) => console.log(m),
         });
-        await worker.loadLanguage("eng");
-        await worker.initialize("eng");
+        // Language is already loaded from createWorker parameter
+        // await worker.loadLanguage("eng");
+        // await worker.initialize("eng");
         await worker.setParameters({
           tessedit_char_whitelist: "0123456789",
-          tessedit_pageseg_mode: "7", // treat the image as a single text line
+          // Fix: Use PSM enum
+          tessedit_pageseg_mode: PSM.SINGLE_LINE,
         });
         if (!cancelled) {
           workerRef.current = worker;
@@ -93,8 +103,9 @@ export default function DigitScanner() {
       rafRef.current = null;
     }
     if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks?.() || [];
-      tracks.forEach((t) => t.stop());
+      // Fix parameter type
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks() || [];
+      tracks.forEach((t: MediaStreamTrack) => t.stop());
       videoRef.current.srcObject = null;
     }
     setStreaming(false);
@@ -112,7 +123,7 @@ export default function DigitScanner() {
   }, []);
 
   // Compute ROI rect relative to video
-  const getROI = () => {
+  const getROI = (): ROIRect | null => {
     const video = videoRef.current;
     if (!video) return null;
     // ROI: centered box occupying 70% width and 25% height
@@ -139,6 +150,7 @@ export default function DigitScanner() {
     canvas.width = roi.w;
     canvas.height = roi.h;
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     ctx.drawImage(video, roi.x, roi.y, roi.w, roi.h, 0, 0, roi.w, roi.h);
 
     try {
@@ -186,9 +198,12 @@ export default function DigitScanner() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8">
       <div className="max-w-3xl mx-auto grid gap-4">
-        <h1 className="text-2xl md:text-3xl font-bold">สแกนตัวเลขจากกล้อง (OCR)</h1>
+        <h1 className="text-2xl md:text-3xl font-bold">
+          สแกนตัวเลขจากกล้อง (OCR)
+        </h1>
         <p className="text-sm opacity-80">
-          ใช้กล้องมือถือเพื่ออ่านตัวเลขแบบเรียลไทม์ • ต้องเปิดผ่าน HTTPS • โฟกัสเฉพาะกรอบสี่เหลี่ยมกลางจอเพื่อความแม่นยำ
+          ใช้กล้องมือถือเพื่ออ่านตัวเลขแบบเรียลไทม์ • ต้องเปิดผ่าน HTTPS •
+          โฟกัสเฉพาะกรอบสี่เหลี่ยมกลางจอเพื่อความแม่นยำ
         </p>
 
         {error && (
@@ -224,7 +239,9 @@ export default function DigitScanner() {
             disabled={!streaming || !ready}
             onClick={handleToggleScan}
             className={`px-4 py-2 rounded-2xl shadow ${
-              scanning ? "bg-amber-100 text-amber-900" : "bg-emerald-600 text-white"
+              scanning
+                ? "bg-amber-100 text-amber-900"
+                : "bg-emerald-600 text-white"
             } disabled:opacity-50`}
           >
             {scanning ? "หยุดสแกน" : "เริ่มสแกน"}
@@ -250,7 +267,9 @@ export default function DigitScanner() {
               {result || "—"}
             </div>
             {conf != null && (
-              <div className="text-sm opacity-70 whitespace-nowrap">conf: {conf}</div>
+              <div className="text-sm opacity-70 whitespace-nowrap">
+                conf: {conf}
+              </div>
             )}
           </div>
         </div>
@@ -264,13 +283,12 @@ export default function DigitScanner() {
   );
 }
 
-function RoiOverlay({ getROI }) {
-  const [rect, setRect] = useState(null);
-  const videoRef = useRef(null);
+function RoiOverlay({ getROI }: RoiOverlayProps) {
+  const [rect, setRect] = useState<ROIRect | null>(null);
 
   // Poll ROI on resize / video metadata loaded
   useEffect(() => {
-    const update = () => setRect(getROI?.());
+    const update = () => setRect(getROI());
     update();
     const handler = () => update();
     window.addEventListener("resize", handler);
@@ -306,10 +324,14 @@ function Tips() {
         <li>พยายามให้ตัวเลขอยู่ในกรอบสีเขียวและกินพื้นที่จอพอสมควร</li>
         <li>แสงสว่างเพียงพอ ลดเงา/สะท้อน</li>
         <li>ตัวเลขแบบฟอนต์ชัดเจน ตรง ไม่เอียงมาก</li>
-        <li>สามารถปรับโค้ดให้ตัดภาพเป็นขาวดำ/เพิ่มคอนทราสต์ก่อน OCR เพื่อผลลัพธ์ที่ดีขึ้น</li>
+        <li>
+          สามารถปรับโค้ดให้ตัดภาพเป็นขาวดำ/เพิ่มคอนทราสต์ก่อน OCR
+          เพื่อผลลัพธ์ที่ดีขึ้น
+        </li>
       </ul>
       <div className="mt-3 text-xs opacity-70">
-        หมายเหตุ: หากต้องการอ่านบาร์โค้ด/QR โดยเฉพาะ แนะนำใช้ BarcodeDetector API (ถ้าบราวเซอร์รองรับ) แทน OCR เพื่อความเร็ว
+        หมายเหตุ: หากต้องการอ่านบาร์โค้ด/QR โดยเฉพาะ แนะนำใช้ BarcodeDetector
+        API (ถ้าบราวเซอร์รองรับ) แทน OCR เพื่อความเร็ว
       </div>
     </div>
   );
