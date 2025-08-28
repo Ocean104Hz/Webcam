@@ -80,6 +80,37 @@ export default function DigitScanner() {
     }
   };
 
+    async function sendToGoogleSheet1(data: { [key: string]: any }) {
+    const url =
+      "https://api.sheety.co/3c71bb24fa11671f4674ec67c9e1895c/webcam/cam1";
+
+    // โครงสร้าง body ต้องตรงกับที่ Sheety กำหนด
+    const body = {
+      cam1: data,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json", // ต้องใส่ header นี้เพื่อบอกว่าเป็น JSON
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        throw new Error(`POST failed: ${response.status}`);
+      }
+
+      const json = await response.json();
+      console.log("✅ ส่งสำเร็จ:", json.cam1);
+      return json.cam1;
+    } catch (error) {
+      console.error("❌ Error ส่งข้อมูล:", error);
+      throw error;
+    }
+  }
+
   // Initialize Tesseract worker
   useEffect(() => {
     let cancelled = false;
@@ -326,6 +357,17 @@ export default function DigitScanner() {
             ส่งผลลัพธ์
           </button>
 
+          <button
+              onClick={() =>
+                sendToGoogleSheet1({
+                  name: "test",
+                  timestamp: new Date().toISOString(),
+                })
+              }
+            >
+              Test
+            </button>
+
           <span className="ml-auto text-sm opacity-70">
             {ready ? "OCR พร้อมใช้งาน" : "กำลังโหลด OCR..."}
           </span>
@@ -430,7 +472,7 @@ function Modal({
       : "bg-red-100 text-red-800 border-red-300";
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
+    <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50 p-6">
       <div
         className={`p-6 rounded-2xl shadow-xl border ${color} max-w-sm w-full`}
       >
