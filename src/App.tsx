@@ -1,14 +1,14 @@
-import Mobile from "./pages/Mobile"
-import './App.css'
+import { Routes, Route } from "react-router-dom";
+import Mobile from "./pages/Mobile";
+import Sheet from "./pages/Sheet";
 
 function App() {
-  
-
   return (
-    <div>
-      <Mobile />
-    </div>
-  )
+    <Routes>
+      <Route path="/" element={<Mobile />} />
+      <Route path="/Sheet" element={<Sheet />} />
+    </Routes>
+  );
 }
 
-export default App
+export default App;

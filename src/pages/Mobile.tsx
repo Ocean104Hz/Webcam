@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createWorker, type Worker, PSM } from "tesseract.js";
 import type { LoggerMessage } from "tesseract.js";
+import { Link } from "react-router-dom";
+
 
 // Define interfaces for better type safety
 interface ROIRect {
@@ -79,37 +81,6 @@ export default function DigitScanner() {
       setModalOpen(true);
     }
   };
-
-    async function sendToGoogleSheet1(data: { [key: string]: any }) {
-    const url =
-      "https://api.sheety.co/3c71bb24fa11671f4674ec67c9e1895c/webcam/cam1";
-
-    // โครงสร้าง body ต้องตรงกับที่ Sheety กำหนด
-    const body = {
-      cam1: data,
-    };
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json", // ต้องใส่ header นี้เพื่อบอกว่าเป็น JSON
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        throw new Error(`POST failed: ${response.status}`);
-      }
-
-      const json = await response.json();
-      console.log("✅ ส่งสำเร็จ:", json.cam1);
-      return json.cam1;
-    } catch (error) {
-      console.error("❌ Error ส่งข้อมูล:", error);
-      throw error;
-    }
-  }
 
   // Initialize Tesseract worker
   useEffect(() => {
@@ -357,16 +328,9 @@ export default function DigitScanner() {
             ส่งผลลัพธ์
           </button>
 
-          <button
-              onClick={() =>
-                sendToGoogleSheet1({
-                  name: "test",
-                  timestamp: new Date().toISOString(),
-                })
-              }
-            >
-              Test
-            </button>
+          <Link to="/Sheet" className="hover:underline px-3 py-2 rounded-2xl shadow bg-blue-500 text-white disabled:opacity-50">
+            หน้าทดสอบส่งข้อมมูล
+          </Link>
 
           <span className="ml-auto text-sm opacity-70">
             {ready ? "OCR พร้อมใช้งาน" : "กำลังโหลด OCR..."}
