@@ -39,7 +39,7 @@ export default function DigitScanner() {
 
     try {
       const res = await fetch(
-        "https://script.google.com/macros/s/AKfycbx2OECGBZT4DuKWz_iYhUV-SwagbSFFdzKiP0xCeIJzAi-wZxIVdxIqJAr5VkERXPIfIg/exec",
+        "https://script.google.com/macros/s/AKfycbzaHo2SXOCbTNfvVotjhFWV7wwEH_B9RHW27ZjI4gOQnXqHTKt5rSVD6rF1O6241rvWXQ/exec",
         {
           method: "POST",
           headers: {
