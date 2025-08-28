@@ -36,64 +36,48 @@ export default function DigitScanner() {
   const intervalRef = useRef<number | null>(null);
 
   const sendToGoogleSheet = async () => {
-    if (!result) {
-      setSendStatus("ไม่มีข้อมูลที่จะส่ง");
-      return;
+  if (!result) {
+    setSendStatus("ไม่มีข้อมูลที่จะส่ง");
+    return;
+  }
+
+  setSendStatus("กำลังส่งข้อมูล...");
+
+  try {
+    // 🔹 เปลี่ยน URL ตรงนี้เป็น URL ของ Sheety ที่ได้มา
+    const sheetyUrl = "https://api.sheety.co/3c71bb24fa11671f4674ec67c9e1895c/webcam/cam1";
+
+    // 🔹 ตามโครงสร้าง Sheety ต้องใส่ object ที่หุ้ม field
+    const body = {
+      result: {
+        value: result, // คุณตั้งชื่อ column ใน Google Sheets ว่าอะไร ต้องตรงกัน เช่น "value"
+      },
+    };
+
+    const response = await fetch(sheetyUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // "Authorization": "Bearer YOUR_TOKEN" // ถ้าเปิด private project ต้องใส่ token ด้วย
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(`POST failed: ${response.status}`);
     }
 
-    setSendStatus("กำลังส่งข้อมูล...");
+    const data = await response.json();
+    console.log("Sheety success:", data);
+    setSendStatus(`✓ ส่งสำเร็จ: ${result}`);
+  } catch (err) {
+    console.error("Sheety error:", err);
+    setSendStatus(`✗ ส่งไม่สำเร็จ: ${String(err)}`);
+  }
 
-    try {
-      // ลองส่งด้วยวิธี POST ก่อน
-      const postResponse = await fetch(
-        "https://script.google.com/macros/s/AKfycbzaHo2SXOCbTNfvVotjhFWV7wwEH_B9RHW27ZjI4gOQnXqHTKt5rSVD6rF1O6241rvWXQ/exec",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ result }),
-        }
-      );
-
-      if (!postResponse.ok) {
-        throw new Error(`POST failed: ${postResponse.status}`);
-      }
-
-      const postData = await postResponse.json();
-      console.log("POST success:", postData);
-      setSendStatus(`✓ ส่งสำเร็จ (POST): ${result}`);
-      
-    } catch (postError) {
-      console.error("POST failed, trying GET:", postError);
-      
-      // ถ้า POST ไม่ได้ ลอง GET
-      try {
-        const getResponse = await fetch(
-          `https://script.google.com/macros/s/AKfycbzaHo2SXOCbTNfvVotjhFWV7wwEH_B9RHW27ZjI4gOQnXqHTKt5rSVD6rF1O6241rvWXQ/exec?result=${encodeURIComponent(result)}`,
-          {
-            method: "GET",
-          }
-        );
-
-        if (!getResponse.ok) {
-          throw new Error(`GET failed: ${getResponse.status}`);
-        }
-
-        const getData = await getResponse.json();
-        console.log("GET success:", getData);
-        setSendStatus(`✓ ส่งสำเร็จ (GET): ${result}`);
-        
-      } catch (getError) {
-        console.error("Both POST and GET failed:", getError);
-        setSendStatus(`✗ ส่งไม่สำเร็จ: ${String(getError)}`);
-      }
-    }
-
-    // Clear status after 3 seconds
-    setTimeout(() => setSendStatus(""), 3000);
-  };
-
+  // ล้างสถานะหลัง 3 วิ
+  setTimeout(() => setSendStatus(""), 3000);
+};
   // Initialize Tesseract worker
   useEffect(() => {
     let cancelled = false;
