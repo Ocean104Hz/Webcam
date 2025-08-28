@@ -18,11 +18,11 @@ export default function DigitScanner() {
   // Fix ref types
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
+
   const [streaming, setStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [result, setResult] = useState("");
-  
+
   // Fix state type for conf
   const [conf, setConf] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -104,7 +104,8 @@ export default function DigitScanner() {
     }
     if (videoRef.current && videoRef.current.srcObject) {
       // Fix parameter type
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks() || [];
+      const tracks =
+        (videoRef.current.srcObject as MediaStream).getTracks() || [];
       tracks.forEach((t: MediaStreamTrack) => t.stop());
       videoRef.current.srcObject = null;
     }
@@ -130,8 +131,8 @@ export default function DigitScanner() {
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!vw || !vh) return null;
-    const roiW = Math.floor(vw * 0.7);
-    const roiH = Math.floor(vh * 0.25);
+    const roiW = Math.floor(vw * 0.5);
+    const roiH = Math.floor(vh * 0.15);
     const x = Math.floor((vw - roiW) / 2);
     const y = Math.floor((vh - roiH) / 2);
     return { x, y, w: roiW, h: roiH };
@@ -147,18 +148,27 @@ export default function DigitScanner() {
     if (!roi) return;
 
     // Draw current ROI frame to canvas
-    canvas.width = roi.w;
-    canvas.height = roi.h;
+    canvas.width = Math.min(roi.w, 640);
+    canvas.height = (roi.h * canvas.width) / roi.w;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, roi.x, roi.y, roi.w, roi.h, 0, 0, roi.w, roi.h);
+    ctx.drawImage(video, roi.x, roi.y, roi.w, roi.h, 0, 0, canvas.width, canvas.height);
+    const imgData = ctx.getImageData(0, 0, roi.w, roi.h);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      const v = avg > 160 ? 255 : 0; // threshold 160
+      data[i] = data[i + 1] = data[i + 2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
 
     try {
       ocrBusyRef.current = true;
       const { data } = await worker.recognize(canvas);
       const text = (data?.text ?? "").trim();
       // keep only digits and collapse spaces/newlines
-      const digits = text.replace(/[^0-9]/g, "").slice(0, 32); // limit length for safety
+      const digits = text.replace(/[^0-9]/g, "").slice(0, 32).replace(/[^0-9OIl]/g, "").replace(/[O]/g, "0").replace(/[Il]/g, "1");
+     // limit length for safety
       if (digits) {
         setResult(digits);
         setConf(Math.round((data?.confidence ?? 0) * 10) / 10);
