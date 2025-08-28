@@ -23,6 +23,7 @@ export default function SimpleForm() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": "Bearer 1e1b4pOkZxEwQoc3w0LpsOD2oZkQRmyd8viy4lgAjW9c" 
         },
         body: JSON.stringify(body),
       });
