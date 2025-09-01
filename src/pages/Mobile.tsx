@@ -4,9 +4,9 @@ import { createWorker, type Worker, PSM } from "tesseract.js";
 import type { LoggerMessage } from "tesseract.js";
 
 interface ROIRect { x: number; y: number; w: number; h: number; }
-interface RoiOverlayProps { getROI: () => ROIRect | null; }
+type ROIs = { pea: ROIRect; kwh: ROIRect };
 
-// ✅ ใส่ URL /exec ของคุณ
+// ✅ URL Apps Script /exec ของคุณ
 const GAS_WEBAPP_URL =
   "https://script.google.com/macros/s/AKfycbwwKTaWCfVg9ahhO40c_zRfdv4vEMSvcGECnwRREgkWgnzOQRzzxpjtmyKu_DsUOu8Y/exec";
 
@@ -16,21 +16,30 @@ export default function DigitScanner() {
 
   const [streaming, setStreaming] = useState(false);
   const [ready, setReady] = useState(false);
-  const [result, setResult] = useState("");
+  const [result, setResult] = useState("");            // ใช้ส่ง PEA (คงเดิม)
   const [conf, setConf] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
 
-  const [testPea, setTestPea] = useState(""); // ช่องทดสอบ PEA
+  const [testPea, setTestPea] = useState("");          // ช่องทดสอบ (คงเดิม)
+
+  // --- NEW: แยกค่า PEA และ kWh ---
+  const [peaSerial, setPeaSerial] = useState("");
+  const [kwhValue, setKwhValue]   = useState("");
 
   const workerRef = useRef<Worker | null>(null);
   const ocrBusyRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
-  const lastReadsRef = useRef<string[]>([]);
+
+  const lastPeaRef = useRef<string[]>([]);
+  const lastKwhRef = useRef<string[]>([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
   const [modalType, setModalType] = useState<"success" | "error">("success");
+
+  // ให้ result = peaSerial เพื่อใช้ปุ่มส่งเดิมได้เหมือนเดิม
+  useEffect(() => { setResult(peaSerial); }, [peaSerial]);
 
   // ======= INIT OCR =======
   useEffect(() => {
@@ -41,7 +50,7 @@ export default function DigitScanner() {
           logger: (m: LoggerMessage) => console.log(m),
         });
         await worker.setParameters({
-          tessedit_char_whitelist: "0123456789OIl|",
+          user_defined_dpi: "300",
           tessedit_pageseg_mode: PSM.SINGLE_LINE,
         });
         if (!cancelled) {
@@ -94,64 +103,89 @@ export default function DigitScanner() {
     };
   }, []);
 
-  // ======= ROI =======
-  const getROI = (): ROIRect | null => {
-    const video = videoRef.current;
-    if (!video) return null;
-    const vw = video.videoWidth, vh = video.videoHeight;
+  // ======= ROIs (PEA บน, kWh กลาง) =======
+  const getROIs = (): ROIs | null => {
+    const v = videoRef.current;
+    if (!v) return null;
+    const vw = v.videoWidth, vh = v.videoHeight;
     if (!vw || !vh) return null;
-    const roiW = Math.floor(vw * 0.7);
-    const roiH = Math.floor(vh * 0.25);
-    const x = Math.floor((vw - roiW) / 2);
-    const y = Math.floor((vh - roiH) / 2);
-    return { x, y, w: roiW, h: roiH };
+
+    // ปรับได้ตามกล้อง/รุ่นมิเตอร์
+    const peaW = Math.floor(vw * 0.55), peaH = Math.floor(vh * 0.12);
+    const peaX = Math.floor((vw - peaW) / 2);
+    const peaY = Math.floor(vh * 0.12);
+
+    const kwhW = Math.floor(vw * 0.50), kwhH = Math.floor(vh * 0.18);
+    const kwhX = Math.floor((vw - kwhW) / 2);
+    const kwhY = Math.floor(vh * 0.44);
+
+    return { pea: { x: peaX, y: peaY, w: peaW, h: peaH },
+             kwh: { x: kwhX, y: kwhY, w: kwhW, h: kwhH } };
   };
 
-  // ======= OCR PASS =======
+  // ======= OCR PASS (อ่าน 2 ROI) =======
   const singleOcrPass = async () => {
     if (ocrBusyRef.current) return;
     const video = videoRef.current, canvas = canvasRef.current, worker = workerRef.current;
     if (!video || !canvas || !worker) return;
-    const roi = getROI(); if (!roi) return;
+    const rois = getROIs(); if (!rois) return;
 
-    canvas.width = Math.min(roi.w, 640);
-    canvas.height = (roi.h * canvas.width) / roi.w;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const doOcr = async (roi: ROIRect, opts: { whitelist: string; invert?: boolean; psm?: PSM }) => {
+      canvas.width = Math.min(roi.w * 2, 1000);
+      canvas.height = Math.min(roi.h * 2, 600);
+      const ctx = canvas.getContext("2d"); if (!ctx) return "";
 
-    ctx.drawImage(video, roi.x, roi.y, roi.w, roi.h, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, roi.x, roi.y, roi.w, roi.h, 0, 0, canvas.width, canvas.height);
 
-    // ขาวดำ + เพิ่มคอนทราสต์
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const d = imgData.data, CONTRAST = 1.15, THRESH = 160;
-    for (let i = 0; i < d.length; i += 4) {
-      let gray = (d[i] + d[i+1] + d[i+2]) / 3;
-      gray = (gray - 128) * CONTRAST + 128;
-      const v = gray > THRESH ? 255 : 0;
-      d[i] = d[i+1] = d[i+2] = v;
-    }
-    ctx.putImageData(imgData, 0, 0);
+      // ขาวดำ + คอนทราสต์ + (กลับสีถ้าต้องการ)
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = img.data, CONTRAST = 1.25, THRESH = 150;
+      for (let i = 0; i < d.length; i += 4) {
+        let gray = (d[i] + d[i+1] + d[i+2]) / 3;
+        gray = (gray - 128) * CONTRAST + 128;
+        let v = gray > THRESH ? 255 : 0;
+        if (opts.invert) v = 255 - v;           // ← สำคัญสำหรับ kWh (ตัวเลขขาวบนดำ)
+        d[i] = d[i+1] = d[i+2] = v;
+      }
+      ctx.putImageData(img, 0, 0);
+
+      await worker.setParameters({
+        tessedit_char_whitelist: opts.whitelist,
+        tessedit_pageseg_mode: opts.psm ?? PSM.SINGLE_WORD,
+      });
+
+      const { data } = await worker.recognize(canvas);
+      return (data?.text ?? "").trim();
+    };
 
     try {
       ocrBusyRef.current = true;
-      const { data } = await worker.recognize(canvas);
-      const text = (data?.text ?? "").trim();
 
-      // Normalize → แล้วค่อยเก็บเฉพาะตัวเลข
-      const normalized = text.replace(/[O]/g, "0").replace(/[Il|]/g, "1");
-      const digits = normalized.replace(/[^0-9]/g, "").slice(0, 32);
+      // --- 1) PEA SERIAL (ไม่ invert) ---
+      const peaRaw = await doOcr(rois.pea, { whitelist: "PEA0123456789", psm: PSM.SINGLE_LINE });
+      const peaDigits =
+        (peaRaw.match(/PEA\s*([0-9]{6,})/i)?.[1] ?? peaRaw.replace(/[^0-9]/g, "")).slice(0, 12);
 
-      if (digits) {
-        lastReadsRef.current.push(digits);
-        if (lastReadsRef.current.length > 3) lastReadsRef.current.shift();
-
-        const allSame = lastReadsRef.current.every(v => v === lastReadsRef.current[0]);
-        const confNow = Math.round((data?.confidence ?? 0) * 10) / 10;
-
-        if (allSame && confNow >= 50) {
-          setResult(digits);
-          setConf(confNow);
-        }
+      if (peaDigits) {
+        lastPeaRef.current.push(peaDigits);
+        if (lastPeaRef.current.length > 3) lastPeaRef.current.shift();
+        const stable = lastPeaRef.current.every(v => v === lastPeaRef.current[0]);
+        if (stable) setPeaSerial(peaDigits);
       }
+
+      // --- 2) kWh (ตัวเลขขาวบนดำ → invert) ---
+      const kwhRaw = await doOcr(rois.kwh, { whitelist: "0123456789", psm: PSM.SINGLE_WORD, invert: true });
+      const kwhDigits = kwhRaw.replace(/[^0-9]/g, "").slice(0, 8);
+
+      if (kwhDigits) {
+        lastKwhRef.current.push(kwhDigits);
+        if (lastKwhRef.current.length > 3) lastKwhRef.current.shift();
+        const stableK = lastKwhRef.current.every(v => v === lastKwhRef.current[0]);
+        if (stableK) setKwhValue(kwhDigits);
+      }
+
+      // เก็บ conf ล่าสุดไว้แสดง (จะเป็นของงานสุดท้าย)
+      setConf(null); // ถ้าต้องการแสดงจริง ๆ สามารถอ่าน data.conf แล้วเก็บไว้แยกต่อ ROI ได้
     } catch (e) {
       console.error(e);
     } finally {
@@ -164,7 +198,7 @@ export default function DigitScanner() {
     setScanning(s => {
       const next = !s;
       if (next) {
-        intervalRef.current = window.setInterval(singleOcrPass, 500);
+        intervalRef.current = window.setInterval(singleOcrPass, 600);
       } else if (intervalRef.current) {
         clearInterval(intervalRef.current); intervalRef.current = null;
       }
@@ -172,7 +206,7 @@ export default function DigitScanner() {
     });
   };
 
-  // ======= Copy & Send =======
+  // ======= Copy & Send (คงของเดิม) =======
   const copyToClipboard = async () => {
     try { await navigator.clipboard.writeText(result || ""); showModal("✓ คัดลอกแล้ว","success"); }
     catch { showModal("✗ คัดลอกไม่สำเร็จ","error"); }
@@ -183,21 +217,23 @@ export default function DigitScanner() {
   };
 
   const sendToGoogleSheet = async (forceValue?: string) => {
-    const peaToSend = ((forceValue ?? testPea) || result).trim(); // แก้ลำดับ ?? / || แล้ว
+    const peaToSend = ((forceValue ?? testPea) || result).trim();
     if (!peaToSend) { showModal("ไม่มีหมายเลข PEA ที่จะส่ง", "error"); return; }
 
     try {
-      // 👉 ยิงตรง Apps Script ด้วย text/plain เพื่อหลบ preflight/CORS
+      // ยิงตรง Apps Script ด้วย text/plain เพื่อลดปัญหา CORS
       const r = await fetch(GAS_WEBAPP_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({ peaNumber: peaToSend }), // ต้องตรงกับ doPost
+        body: JSON.stringify({ peaNumber: peaToSend /*, kWh: kwhValue*/ }),
       });
 
       const ct = (r.headers.get("content-type") || "").toLowerCase();
       const data = ct.includes("application/json") ? await r.json() : { ok:false, raw: await r.text() };
 
-      if (!r.ok || (data as any)?.ok === false) throw new Error((data as any)?.error || (data as any)?.raw || "Request failed");
+      if (!r.ok || (data as any)?.ok === false)
+        throw new Error((data as any)?.error || (data as any)?.raw || "Request failed");
+
       showModal(`✓ ส่งสำเร็จ: ${peaToSend}`, "success");
     } catch (err) {
       console.error("Send error:", err);
@@ -213,7 +249,7 @@ export default function DigitScanner() {
 
         <div className="relative rounded-2xl overflow-hidden shadow-md bg-black">
           <video ref={videoRef} className="w-full h-auto block" playsInline muted autoPlay />
-          <RoiOverlay getROI={getROI} />
+          <RoiOverlay getROIs={getROIs} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -222,7 +258,7 @@ export default function DigitScanner() {
             {streaming ? "ปิดกล้อง" : "เปิดกล้อง"}
           </button>
 
-        <button type="button" disabled={!streaming || !ready} onClick={handleToggleScan}
+          <button type="button" disabled={!streaming || !ready} onClick={handleToggleScan}
             className={`px-4 py-2 rounded-2xl shadow ${scanning ? "bg-amber-100 text-amber-900" : "bg-emerald-600 text-white"} disabled:opacity-50`}>
             {scanning ? "หยุดสแกน" : "เริ่มสแกน"}
           </button>
@@ -240,15 +276,21 @@ export default function DigitScanner() {
           <span className="ml-auto text-sm opacity-70">{ready ? "OCR พร้อมใช้งาน" : "กำลังโหลด OCR..."}</span>
         </div>
 
-        {/* ผลลัพธ์ OCR */}
+        {/* ผลลัพธ์ */}
         <div className="grid gap-2">
-          <label className="text-sm opacity-70">ผลลัพธ์ที่อ่านได้</label>
           <div className="flex items-center gap-2">
+            <div className="w-28 text-sm opacity-60">PEA</div>
             <div className="flex-1 p-3 rounded-2xl bg-white border border-slate-200 font-mono text-lg">
-              {result || "—"}
+              {peaSerial || "—"}
             </div>
-            {conf != null && <div className="text-sm opacity-70">conf: {conf}</div>}
           </div>
+          <div className="flex items-center gap-2">
+            <div className="w-28 text-sm opacity-60">kWh</div>
+            <div className="flex-1 p-3 rounded-2xl bg-white border border-slate-200 font-mono text-lg">
+              {kwhValue || "—"}
+            </div>
+          </div>
+          {conf != null && <div className="text-sm opacity-70">conf (ล่าสุด): {conf}</div>}
         </div>
 
         {/* ช่องทดสอบส่งหมายเลข PEA */}
@@ -261,7 +303,7 @@ export default function DigitScanner() {
               placeholder="พิมพ์หมายเลข PEA เพื่อทดสอบ"
               className="flex-1 p-3 rounded-2xl bg-white border border-slate-200"
             />
-            <button type="button" onClick={() => setResult(testPea.trim())}
+            <button type="button" onClick={() => setPeaSerial(testPea.trim())}
               disabled={!testPea.trim()}
               className="px-3 py-2 rounded-2xl shadow bg-slate-100 disabled:opacity-50">
               ตั้งค่าผลลัพธ์
@@ -276,31 +318,44 @@ export default function DigitScanner() {
         </div>
 
         <canvas ref={canvasRef} className="hidden" />
+
         <Modal open={modalOpen} onClose={() => setModalOpen(false)} message={modalMessage} type={modalType} />
       </div>
     </div>
   );
 }
 
-// ===== Overlay ROI =====
-function RoiOverlay({ getROI }: RoiOverlayProps) {
-  const [rect, setRect] = useState<ROIRect | null>(null);
+// ===== Overlay แสดง 2 ROI =====
+function RoiOverlay({ getROIs }: { getROIs: () => ROIs | null }) {
+  const [r, setR] = useState<ROIs | null>(null);
   useEffect(() => {
-    const update = () => setRect(getROI());
-    update();
-    const id = setInterval(update, 500);
+    const upd = () => setR(getROIs());
+    upd();
+    const id = setInterval(upd, 500);
     return () => clearInterval(id);
-  }, [getROI]);
-  if (!rect) return null;
+  }, [getROIs]);
+  if (!r) return null;
+
+  // ใช้เปอร์เซ็นต์ให้เลย์เอาท์ยืดหยุ่นตามวิดีโอ
   return (
-    <div className="absolute inset-0 grid place-items-center pointer-events-none">
-      <div className="rounded-2xl border-4 border-emerald-400/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]"
-        style={{ width: "70%", height: "25%" }} />
+    <div className="absolute inset-0 pointer-events-none">
+      {/* กรอบ PEA (เขียว) */}
+      <div
+        className="absolute border-4 border-emerald-400/80 rounded-2xl"
+        style={{ left: "22.5%", right: "22.5%", top: "12%", height: "12%" }}
+      />
+      {/* กรอบ kWh (ฟ้า) */}
+      <div
+        className="absolute border-4 border-sky-400/80 rounded-2xl"
+        style={{ left: "25%", right: "25%", top: "44%", height: "18%" }}
+      />
+      {/* เงามืดรอบนอก */}
+      <div className="absolute inset-0 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] rounded-2xl"/>
     </div>
   );
 }
 
-// ===== Modal =====
+// ===== Modal (คงเดิม) =====
 function Modal({ open, onClose, message, type }: {
   open: boolean; onClose: () => void; message: string; type: "success" | "error";
 }) {
