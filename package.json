@@ -2,7 +2,7 @@
   "name": "webcam",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "engines": { "node": ">=18" },
   "scripts": {
     "dev": "concurrently \"vite\" \"node server.js\"",
     "build": "tsc -b && vite build",
@@ -44,7 +44,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/Ocean104Hz/Webcam/issues"
   },
