@@ -315,6 +315,7 @@ export default function DigitScanner() {
             </button>
           </div>
           <p className="text-xs opacity-60">ช่องนี้ไว้ลองส่งหมายเลข PEA โดยไม่ต้องใช้กล้อง/สแกนจริง</p>
+          <a href="https://docs.google.com/spreadsheets/d/1iFf_KSzgvK38FRQBkUNHs49CKmdxFSiFnYPY2nSS_ww/edit?usp=sharing" className="text-xs opacity-60 t-10">ดูข้อมูลที่นี้...</a>
         </div>
 
         <canvas ref={canvasRef} className="hidden" />
@@ -342,7 +343,7 @@ function RoiOverlay({ getROIs }: { getROIs: () => ROIs | null }) {
       {/* กรอบ PEA (เขียว) */}
       <div
         className="absolute border-4 border-emerald-400/80 rounded-2xl"
-        style={{ left: "22.5%", right: "22.5%", top: "12%", height: "12%" }}
+        style={{ left: "22.5%", right: "22.5%", top: "24%", height: "12%" }}
       />
       {/* กรอบ kWh (ฟ้า) */}
       <div
